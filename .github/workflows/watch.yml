@@ -1,0 +1,68 @@
+name: Watch game-worn
+
+on:
+  workflow_dispatch: # cron-job.org kutsuu tätä 1 min välein
+  schedule:
+    - cron: '*/30 * * * *' # varasuoja jos ulkoinen ajastin pettää
+
+permissions:
+  contents: write
+
+# Ei concurrency-ryhmää tarkoituksella: minuutin ajovälillä se jonouttaisi ajoja
+# ja kasvattaisi viivettä. State kirjoitetaan vain kun jotain oikeasti muuttuu,
+# joten push-törmäys on käytännössä mahdoton (ja hoidetaan rebase-retryllä).
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Ei setup-nodea: ubuntu-latest -runnerilla on Node valmiina (säästää ~10 s)
+      - name: Check collection
+        run: node scripts/check.mjs
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Commit state
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/
+          if git diff --staged --quiet; then
+            echo "Ei state-muutoksia."
+            exit 0
+          fi
+          git commit -m "state: game-worn updated"
+          for i in 1 2 3; do
+            if git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "State-pushi epäonnistui kolmesti."
+          exit 1
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # jq rakentaa JSONin turvallisesti (rivinvaihdot ym. escapettuvat oikein)
+          payload=$(jq -n \
+            --arg chat "${TELEGRAM_CHAT_ID}" \
+            --arg url "${RUN_URL}" \
+            '{chat_id: $chat,
+              text: ("⚠️ GAME WORN -vahti kaatui.\n\nTarkista loki: " + $url),
+              disable_web_page_preview: true}')
+          curl -sS --max-time 15 \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H 'content-type: application/json' \
+            --data "$payload"
