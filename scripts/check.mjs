@@ -16,7 +16,7 @@ const SHOP = 'https://tps-shop.fi'
 const COLLECTION = process.env.COLLECTION_HANDLE || 'game-worn'
 const STATE_PATH = fileURLToPath(new URL(`../state/${COLLECTION}.json`, import.meta.url))
 
-const USER_AGENT = 'tps-shop-watcher (github.com/aleksistulonen/tps-shop-watcher)'
+const USER_AGENT = 'shop-watcher (+https://github.com/al3ksis/shop-watcher)'
 const TIMEOUT_MS = 15_000
 const RETRIES = 3
 const TELEGRAM_MAX_CHARS = 4000 // Telegramin raja on 4096, jätetään marginaali

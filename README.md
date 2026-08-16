@@ -68,7 +68,7 @@ vahti hiljenee huomaamatta.
 
 | Asetus | Arvo |
 | --- | --- |
-| URL | `https://api.github.com/repos/<owner>/<repo>/actions/workflows/watch.yml/dispatches` |
+| URL | `https://api.github.com/repos/al3ksis/shop-watcher/actions/workflows/watch.yml/dispatches` |
 | Method | `POST` |
 | Väli | 1 min |
 | Body | `{"ref":"main"}` |
