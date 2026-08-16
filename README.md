@@ -1,13 +1,13 @@
-# TPS Shop – GAME WORN -tuotevahti
+# GAME WORN -tuotevahti
 
-Valvoo <https://tps-shop.fi/collections/game-worn> -kokoelmaa minuutin välein ja
+Valvoo Shopify -kokoelmaa minuutin välein ja
 lähettää Telegram-viestin heti kun kokoelmaan ilmestyy uusi tuote.
 
 Ei riippuvuuksia — pelkkä Node (natiivi `fetch`) ja GitHub Actions.
 
 ## Miten se toimii
 
-1. `scripts/check.mjs` hakee `https://tps-shop.fi/collections/game-worn/products.json`
+1. `scripts/check.mjs` hakee `https://xxx.yy/collections/game-worn/products.json`
 2. Vertaa tuote-id:itä `state/game-worn.json` -tiedostoon
 3. Jos uusia löytyy → Telegram-viesti (otsikko, hintahaarukka, saatavilla olevat
    variantit, suora linkki tuotteeseen)
