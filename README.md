@@ -111,6 +111,12 @@ TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... node scripts/check.mjs --simulate-ne
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... node scripts/check.mjs
 ```
 
+Saman testin voi ajaa ilman paikallista ympäristöä: GitHub → Actions →
+**Watch game-worn** → *Run workflow* → rastita `simulate_new`. Tämä lähettää
+oikean viestin Telegramiin, mutta **ei kirjoita statea**, joten vahdin tila
+säilyy ennallaan. cron-job.org ei lähetä inputteja, joten ajastetut ajot ovat
+aina normaaleja.
+
 Ympäristömuuttujat:
 
 | Muuttuja | Oletus | Selitys |
