@@ -2,6 +2,11 @@ name: Watch game-worn
 
 on:
   workflow_dispatch: # cron-job.org kutsuu tätä 1 min välein
+    inputs:
+      simulate_new:
+        description: 'Testi: lähetä ilmoitus kuin viimeisin tuote olisi uusi'
+        type: boolean
+        default: false
   schedule:
     - cron: '*/30 * * * *' # varasuoja jos ulkoinen ajastin pettää
 
@@ -24,7 +29,9 @@ jobs:
 
       # Ei setup-nodea: ubuntu-latest -runnerilla on Node valmiina (säästää ~10 s)
       - name: Check collection
-        run: node scripts/check.mjs
+        # simulate_new on vain käsin ajettavaa testiä varten; cron-job.org ei
+        # lähetä inputteja, joten oletus on aina normaali ajo.
+        run: node scripts/check.mjs ${{ inputs.simulate_new && '--simulate-new' || '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
