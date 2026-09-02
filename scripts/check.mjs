@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Valvoo tps-shop.fi:n game-worn -kokoelmaa ja ilmoittaa Telegramiin
-// kun kokoelmaan ilmestyy uusi tuote.
+// kun kokoelmaan ilmestyy tuote. Kokoelma saa olla tyhjä — ilmoitus lähtee
+// heti kun sinne ilmestyy yksikin tuote.
 //
 // Käyttö:
 //   node scripts/check.mjs                 normaali ajo
@@ -29,28 +30,36 @@ const NOTIFY_ON_COUNT_CHANGE = process.env.NOTIFY_ON_COUNT_CHANGE !== '0'
 
 // --- HTTP ------------------------------------------------------------------
 
-async function fetchJson(url, { required = true } = {}) {
+// Palauttaa aina { data, status, error } eikä heitä: kutsuja päättää mitä
+// tehdä. Status tarvitaan, jotta 404 (kokoelmaa ei ole) erottuu verkkohäiriöstä.
+async function tryFetchJson(url) {
   let lastError
+  let lastStatus = null
   for (let attempt = 1; attempt <= RETRIES; attempt++) {
     try {
       const res = await fetch(url, {
         headers: { 'user-agent': USER_AGENT, accept: 'application/json' },
         signal: AbortSignal.timeout(TIMEOUT_MS),
       })
+      lastStatus = res.status
       // 4xx (paitsi 429) ei parane uudelleenyrityksellä
       if (!res.ok && res.status !== 429 && res.status < 500) {
-        throw new Error(`${url} → HTTP ${res.status}`)
+        return { data: null, status: res.status, error: new Error(`${url} → HTTP ${res.status}`) }
       }
       if (!res.ok) throw new Error(`${url} → HTTP ${res.status} (yritetään uudelleen)`)
-      return await res.json()
+      return { data: await res.json(), status: res.status, error: null }
     } catch (err) {
       lastError = err
       if (attempt < RETRIES) await sleep(attempt * 2000)
     }
   }
-  if (required) throw lastError
-  console.warn(`varoitus: ${lastError.message}`)
-  return null
+  return { data: null, status: lastStatus, error: lastError }
+}
+
+async function fetchJson(url) {
+  const { data, error } = await tryFetchJson(url)
+  if (error) throw error
+  return data
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -137,7 +146,7 @@ function formatNewProducts(products) {
 
 function formatCountChange(before, after) {
   return [
-    'ℹ️ <b>GAME WORN -kokoelma muuttui</b>',
+    'ℹ️ <b>GAME WORN -kokoelmaan liitettiin tuotteita</b>',
     '',
     `Kokoelmaan liitettyjen tuotteiden määrä: ${before} → ${after}`,
     'Julkisia tuotteita ei tullut lisää — tuote on todennäköisesti',
@@ -189,6 +198,22 @@ async function sendTelegram(text) {
 // --- Pääohjelma ------------------------------------------------------------
 
 async function main() {
+  // Kokoelman olemassaolo tarkistetaan tästä, ei tuotemäärästä: Shopify
+  // palauttaa olemattomallekin kokoelmalle products.json:sta HTTP 200 + tyhjän
+  // taulukon, mutta collection.json:sta 404. Näin tyhjä kokoelma on normaali
+  // tila (vahti odottaa tuotetta) ja vain kadonnut kokoelma kaataa ajon.
+  const meta = await tryFetchJson(`${SHOP}/collections/${COLLECTION}.json`)
+  if (meta.status === 404) {
+    throw new Error(
+      `kokoelmaa "${COLLECTION}" ei löydy (HTTP 404) — handle on todennäköisesti ` +
+        `vaihtunut tai kokoelma piilotettu. Tarkista ${SHOP}/collections/${COLLECTION}`,
+    )
+  }
+  if (meta.error) console.warn(`varoitus: ${meta.error.message}`)
+  // products_count paljastaa kokoelmaan liitetyt mutta vielä julkaisemattomat
+  // tuotteet. Jos haku epäonnistui verkkosyistä, ajo jatkuu ilman sitä.
+  const productsCount = meta.data?.collection?.products_count ?? null
+
   const productsUrl = `${SHOP}/collections/${COLLECTION}/products.json?limit=250`
   const data = await fetchJson(productsUrl)
 
@@ -198,24 +223,10 @@ async function main() {
     throw new Error(`${productsUrl}: vastauksesta puuttuu "products"-taulukko`)
   }
   const current = data.products
-  console.log(`Kokoelmassa ${COLLECTION}: ${current.length} julkista tuotetta.`)
-
-  // Shopify palauttaa olemattomalle kokoelmalle HTTP 200 + tyhjän taulukon,
-  // ei 404:ää. Tyhjä tulos tarkoittaa siis lähes varmasti että kokoelman handle
-  // on vaihtunut tai kokoelma on piilotettu — ei sitä että tuotteet loppuivat.
-  // Kaadetaan ajo, jotta vahti ei hiljene huomaamatta.
-  if (current.length === 0 && process.env.ALLOW_EMPTY !== '1') {
-    throw new Error(
-      `kokoelma "${COLLECTION}" palautti 0 tuotetta — handle on todennäköisesti ` +
-        `vaihtunut tai kokoelma piilotettu. Tarkista ${SHOP}/collections/${COLLECTION} ` +
-        `(ohita tarvittaessa: ALLOW_EMPTY=1)`,
-    )
-  }
-
-  // Pehmeä haku: products_count paljastaa kokoelmaan liitetyt mutta vielä
-  // julkaisemattomat tuotteet. Jos tämä epäonnistuu, ajo jatkuu normaalisti.
-  const meta = await fetchJson(`${SHOP}/collections/${COLLECTION}.json`, { required: false })
-  const productsCount = meta?.collection?.products_count ?? null
+  console.log(
+    `Kokoelmassa ${COLLECTION}: ${current.length} julkista tuotetta` +
+      (productsCount !== null ? `, liitettyjä ${productsCount}.` : '.'),
+  )
 
   const nextState = {
     collection: COLLECTION,
@@ -234,8 +245,10 @@ async function main() {
         [
           '👀 <b>GAME WORN -vahti käynnistetty</b>',
           '',
-          `Seurataan nyt ${current.length} tuotetta.`,
-          'Saat viestin heti kun kokoelmaan ilmestyy uusi tuote.',
+          current.length === 0
+            ? 'Kokoelmassa ei ole nyt yhtään tuotetta.'
+            : `Seurataan nyt ${current.length} tuotetta.`,
+          'Saat viestin heti kun kokoelmaan ilmestyy tuote.',
           '',
           `${SHOP}/collections/${COLLECTION}`,
         ].join('\n'),
@@ -245,33 +258,57 @@ async function main() {
   }
 
   const knownIds = new Set(previous.products.map((p) => p.id))
-  if (SIMULATE_NEW && previous.products.length) {
-    const victim = previous.products.at(-1)
+  if (SIMULATE_NEW && current.length) {
+    const victim = current.at(-1)
     knownIds.delete(victim.id)
     console.log(`--simulate-new: käsitellään "${victim.title}" uutena.`)
   }
 
   const newProducts = current.filter((p) => !knownIds.has(p.id))
+  // Tyhjällä kokoelmalla ei ole mitään mitä teeskennellä uudeksi, joten
+  // testiajo rakentaa tuotteen itse — muuten testipolku olisi käyttökelvoton
+  // juuri siinä tilanteessa jota vahti nyt odottaa.
+  if (SIMULATE_NEW && !newProducts.length) {
+    console.log('--simulate-new: kokoelma on tyhjä, käytetään testituotetta.')
+    newProducts.push({
+      title: 'TESTITUOTE, GAME WORN',
+      handle: 'testituote',
+      variants: [{ title: 'M', price: '199.00', available: true }],
+    })
+  }
 
-  if (newProducts.length) {
-    console.log(`Uusia tuotteita: ${newProducts.map((p) => p.title).join(', ')}`)
-    await sendTelegram(formatNewProducts(newProducts))
-  } else if (
-    NOTIFY_ON_COUNT_CHANGE &&
+  const currentIds = new Set(current.map((p) => p.id))
+  const removed = previous.products.filter((p) => !currentIds.has(p.id))
+  const countChanged =
     productsCount !== null &&
     previous.productsCount !== null &&
     previous.productsCount !== undefined &&
     productsCount !== previous.productsCount
-  ) {
-    console.log(`products_count muuttui: ${previous.productsCount} → ${productsCount}`)
+
+  if (newProducts.length) {
+    console.log(`Uusia tuotteita: ${newProducts.map((p) => p.title).join(', ')}`)
+    await sendTelegram(formatNewProducts(newProducts))
+  } else if (NOTIFY_ON_COUNT_CHANGE && countChanged && productsCount > previous.productsCount) {
+    // Vain kasvu on ennakkosignaali tulevasta julkaisusta. Laskeva luku
+    // tarkoittaa että ylläpitäjä poisti tuotteen kokoelmasta — ei ilmoitusta.
+    console.log(`products_count kasvoi: ${previous.productsCount} → ${productsCount}`)
     await sendTelegram(formatCountChange(previous.productsCount, productsCount))
+  } else if (removed.length || countChanged) {
+    // Poistuma tai laskenut liitettyjen määrä: ei ilmoitusta, mutta state on
+    // päivitettävä, jotta sama tuote tunnistetaan uudeksi jos se palaa.
+    if (removed.length) {
+      console.log(`Poistuneita tuotteita: ${removed.map((p) => p.title).join(', ')}`)
+    }
+    if (countChanged) {
+      console.log(`products_count muuttui: ${previous.productsCount} → ${productsCount}`)
+    }
   } else {
     console.log('Ei muutoksia.')
     return // ei kirjoiteta statea turhaan → ei turhia commiteja
   }
 
-  // State kirjoitetaan vasta kun ilmoitus on mennyt läpi: jos lähetys kaatuu,
-  // seuraava ajo yrittää saman muutoksen uudelleen.
+  // State kirjoitetaan vasta kun mahdollinen ilmoitus on mennyt läpi: jos
+  // lähetys kaatuu, seuraava ajo yrittää saman muutoksen uudelleen.
   if (!DRY_RUN && !SIMULATE_NEW) await saveState(nextState)
 }
 

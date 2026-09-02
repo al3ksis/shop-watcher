@@ -1,18 +1,25 @@
 # GAME WORN -tuotevahti
 
 Valvoo Shopify -kokoelmaa minuutin välein ja
-lähettää Telegram-viestin heti kun kokoelmaan ilmestyy uusi tuote.
+lähettää Telegram-viestin heti kun kokoelmaan ilmestyy tuote. Kokoelma saa olla
+tyhjä — ilmoitus lähtee jo ensimmäisestä ilmestyvästä tuotteesta.
 
 Ei riippuvuuksia — pelkkä Node (natiivi `fetch`) ja GitHub Actions.
 
 ## Miten se toimii
 
-1. `scripts/check.mjs` hakee `https://xxx.yy/collections/game-worn/products.json`
-2. Vertaa tuote-id:itä `state/game-worn.json` -tiedostoon
-3. Jos uusia löytyy → Telegram-viesti (otsikko, hintahaarukka, saatavilla olevat
+1. `scripts/check.mjs` varmistaa `https://xxx.yy/collections/game-worn.json`
+   -endpointista että kokoelma on yhä olemassa (404 = handle vaihtunut tai
+   kokoelma piilotettu → ajo kaatuu ja Telegramiin lähtee hälytys)
+2. Hakee `https://xxx.yy/collections/game-worn/products.json`
+3. Vertaa tuote-id:itä `state/game-worn.json` -tiedostoon
+4. Jos uusia löytyy → Telegram-viesti (otsikko, hintahaarukka, saatavilla olevat
    variantit, suora linkki tuotteeseen)
-4. State päivitetään ja committoidaan **vasta kun viesti on mennyt läpi** — jos
+5. State päivitetään ja committoidaan **vasta kun viesti on mennyt läpi** — jos
    lähetys kaatuu, seuraava ajo yrittää saman muutoksen uudelleen
+
+Tyhjä kokoelma on normaali tila: tuotteen poistuminen päivittää staten hiljaisesti
+ilman ilmoitusta, ja seuraava ilmestyvä tuote laukaisee viestin.
 
 Ajastus tulee **ulkopuolelta** (cron-job.org), joka kutsuu GitHubin
 `workflow_dispatch`-endpointia. Syyt: GitHubin oma `schedule`-cron on epätarkka
@@ -23,9 +30,10 @@ Workflow'ssa on silti `schedule`-varasuoja 30 min välein.
 
 `collections/game-worn.json` -endpointin `products_count` kertoo kuinka monta
 tuotetta kokoelmaan on **liitetty** — myös julkaisemattomat. Kirjoitushetkellä
-luku on 4, vaikka julkisia tuotteita on 1. Kun tämä luku muuttuu ilman että
+luku on 4, vaikka julkisia tuotteita on 0. Kun tämä luku **kasvaa** ilman että
 julkisia tuotteita tulee lisää, tulee erillinen, hillitympi ilmoitus: tuote on
-valmisteilla mutta ei vielä julkaistu. Pois päältä: `NOTIFY_ON_COUNT_CHANGE=0`.
+valmisteilla mutta ei vielä julkaistu. Laskevasta luvusta ei ilmoiteta.
+Pois päältä: `NOTIFY_ON_COUNT_CHANGE=0`.
 
 ## Käyttöönotto
 
@@ -105,6 +113,7 @@ node scripts/check.mjs --dry-run
 node scripts/check.mjs --seed
 
 # Lähetä oikea viesti puhelimeen teeskentelemällä että viimeisin tuote on uusi
+# (tyhjällä kokoelmalla käytetään testituotetta, jotta testi toimii silloinkin)
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... node scripts/check.mjs --simulate-new
 
 # Normaali ajo
@@ -125,7 +134,6 @@ Ympäristömuuttujat:
 | `TELEGRAM_CHAT_ID` | – | pakollinen (paitsi `--dry-run` / `--seed`) |
 | `COLLECTION_HANDLE` | `game-worn` | valvottava kokoelma |
 | `NOTIFY_ON_COUNT_CHANGE` | `1` | `0` = ei ennakkosignaali-ilmoituksia |
-| `ALLOW_EMPTY` | `0` | `1` = salli tyhjä kokoelma kaatamatta ajoa |
 
 ## Kuormitus
 
@@ -138,9 +146,10 @@ kuorma kaupalle on olematon.
 Skripti **kaatuu tarkoituksella** (exit 1) eikä kirjoita statea, jos:
 
 - `products.json` ei vastaa 200:lla tai vastauksesta puuttuu `products`-taulukko
-- kokoelma palauttaa **0 tuotetta** — Shopify vastaa olemattomalle kokoelmalle
-  HTTP 200 + tyhjä taulukko (ei 404), joten tämä tarkoittaa lähes varmasti että
-  handle on vaihtunut tai kokoelma piilotettu
+- `collections/<handle>.json` palauttaa **404** — kokoelmaa ei enää ole:
+  handle on vaihtunut tai kokoelma piilotettu. (Tyhjä kokoelma **ei** ole virhe,
+  koska Shopify vastaa olemattomallekin kokoelmalle `products.json`:sta
+  HTTP 200 + tyhjällä taulukolla — siksi olemassaolo tarkistetaan erikseen.)
 - Telegram-lähetys epäonnistuu
 
 Kaatuminen laukaisee workflow'n `Notify on failure` -askeleen, joka lähettää

@@ -10,8 +10,9 @@ Alkuperäinen suunnitelma valvoi **uusien kokoelmien** ilmestymistä
 olemassa. Tarkistus osoitti toisin:
 
 - `game-worn`-kokoelma on julkaistu jo 2025-07-07
-- Siinä on **yksi** julkinen tuote: "PRE SEASON 26, GAME WORN"
-  (26 varianttia, pelaajakohtaiset paidat 150–225 €)
+- Siinä oli **yksi** julkinen tuote: "PRE SEASON 26, GAME WORN"
+  (26 varianttia, pelaajakohtaiset paidat 150–225 €). Tuote poistui myynnistä
+  2026-09, joten kokoelma on nyt tyhjä ja vahti odottaa seuraavaa tuotetta.
 
 Varsinainen tarve on siis *uusi tuote olemassa olevassa kokoelmassa*, jolloin
 valvottava endpoint vaihtuu:
@@ -26,7 +27,7 @@ on luotettava lähde eikä sivun raapimista tarvita.
 ## `products_count` on ennakkosignaali
 
 `/collections/game-worn.json` kertoo `products_count: 4`, vaikka julkisia
-tuotteita on 1. Kokoelmaan on siis liitetty 3 tuotetta, joita ei ole julkaistu
+tuotteita on 0. Kokoelmaan on siis liitetty 3 tuotetta, joita ei ole julkaistu
 Online Store -kanavaan. Tämä voi laueta tunteja tai päiviä ennen julkaisua, mutta
 se voi myös heilua turhaan ylläpitäjän muokatessa kokoelmaa. Siksi se on oma,
 selvästi merkitty ja pois kytkettävä viestityyppinsä — ei korvaa tuotediffiä.
@@ -58,12 +59,20 @@ päällekkäiset ajot ja kasvattaisi viivettä. Push-törmäys on käytännöss�
 koska state kirjoitetaan vain todellisen muutoksen yhteydessä; varmuudeksi push
 tehdään `git pull --rebase` -uudelleenyrityksellä.
 
-## Miksi tyhjä tulos kaataa ajon
+## Miksi kokoelman olemassaolo tarkistetaan erikseen
 
-Shopify palauttaa olemattomalle kokoelmalle **HTTP 200 ja tyhjän
-`products`-taulukon**, ei 404:ää. Ilman erillistä tarkistusta vahti hiljenisi
-huomaamatta jos kokoelman handle vaihtuu tai kokoelma piilotetaan. Siksi 0
-tuotetta = virhe (exit 1) → workflow lähettää Telegramiin hälytyksen.
+Shopify palauttaa olemattomalle kokoelmalle `products.json`:sta **HTTP 200 ja
+tyhjän `products`-taulukon**, ei 404:ää. Ilman erillistä tarkistusta vahti
+hiljenisi huomaamatta jos kokoelman handle vaihtuu tai kokoelma piilotetaan.
+
+Ensin tämä ratkaistiin säännöllä "0 tuotetta = virhe". Se ei enää kelpaa, koska
+kokoelma on oikeasti tyhjä — sääntö tuotti pelkkää hälytystä. Tilalla on
+`/collections/<handle>.json`, joka **palauttaa 404** kun kokoelmaa ei ole mutta
+HTTP 200 tyhjällekin kokoelmalle. Näin tyhjä kokoelma on normaali odotustila ja
+vain oikeasti kadonnut kokoelma kaataa ajon (exit 1 → Telegram-hälytys).
+
+Verkkovirhe samassa haussa ei kaada ajoa, vaan jättää `products_count`-signaalin
+pois yhdeltä ajolta; vain eksplisiittinen 404 tulkitaan kadonneeksi kokoelmaksi.
 
 Sama periaate muuallakin: state päivitetään vasta onnistuneen ilmoituksen
 jälkeen, jotta epäonnistunut ajo ei "kuluta" muutosta.
