@@ -1,5 +1,12 @@
 {
   "collection": "game-worn",
   "productsCount": 4,
-  "products": []
+  "products": [
+    {
+      "id": 12155610628360,
+      "handle": "pre-season-26-game-worn",
+      "title": "PRE SEASON 26, GAME WORN",
+      "publishedAt": "2026-09-08T09:47:02+03:00"
+    }
+  ]
 }
